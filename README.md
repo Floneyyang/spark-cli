@@ -1,25 +1,43 @@
 # Spark
 
-A small AI assistant that works in your terminal. Ask about a project, approve a
-command, inspect its real output, and follow up. Built in Rust, with three source
-files and two tools. macOS and Linux only.
+A small **shell written in Rust, with AI assistance**. Type ordinary commands to
+run programs directly. Prefix a request with `?` to ask AI to inspect files,
+propose commands, or explain something. macOS and Linux only.
+
+```text
+spark:/your/project> ls
+Cargo.toml  src  README.md
+spark:/your/project> cd src
+spark:/your/project/src> pwd
+/your/project/src
+spark:/your/project/src> ? explain main.rs
+  read main.rs
+spark> ...
+```
 
 ## Run
 
 Install a current stable Rust toolchain from [rustup.rs](https://rustup.rs), then:
 
 ```sh
+cargo run
+```
+
+The shell works without credentials. To enable AI, export a key in your existing
+terminal before starting Spark:
+
+```sh
 export OPENAI_API_KEY='your-api-key'
 cargo run
 ```
 
-Spark defaults to [`gpt-5.4-mini`](https://developers.openai.com/api/docs/models/gpt-5.4-mini),
-a compact coding model with Responses API function calling. Your API account
-needs access to the model. To choose another compatible model, export
-`OPENAI_MODEL='your-model-id'`. Variables must be exported in your shell;
-`.env` files are not loaded.
+Spark defaults to [`gpt-5.4-mini`](https://developers.openai.com/api/docs/models/gpt-5.4-mini).
+Your account needs access to the model. Optionally export
+`OPENAI_MODEL='your-model-id'` to choose another Responses-compatible model.
+`.env` files are not loaded automatically; source your local `.env` from your
+existing shell before launching Spark if you keep the key there.
 
-To use Spark from another project:
+To use Spark from another directory:
 
 ```sh
 cargo install --path .
@@ -27,18 +45,20 @@ cd /path/to/your/project
 spark
 ```
 
-Spark uses the directory where it starts as its project directory for the session.
-`spark --help` works without credentials. Startup checks configuration; the first
-message makes the API connection.
-
 ## Two-minute demo
 
 ```text
-you> Read Cargo.toml and explain what this project does.
+spark:/your/project> pwd
+/your/project
+
+spark:/your/project> cargo test
+...real test output, directly in your terminal...
+
+spark:/your/project> ? Read Cargo.toml and explain this project.
   read Cargo.toml
 spark> ...
 
-you> Run the tests and explain the result.
+spark:/your/project> ? Run the tests and explain the result.
   Directory: /your/project
   Command: cargo test
   Reason: Check the project's tests.
@@ -47,54 +67,77 @@ Exit: exit status: 0
 ...
 spark> ...
 
-you> Which source file should I read first, and why?
+spark:/your/project> ? Which source file should I read first?
 spark> ...
 
-you> /clear
-Conversation cleared.
-you> /exit
+spark:/your/project> exit
 ```
 
-The transcript illustrates the flow; model wording and tool choices vary.
-The commands `/help`, `/clear`, and `/exit` are local. Up/down recalls input during
-the session. Ctrl-C cancels an API request or running command; at the prompt it
-clears input. Ctrl-D exits. Press Enter at approval to decline and stop that turn.
+AI wording and tool choices vary. **Only AI-requested commands need approval.**
+Ordinary commands execute immediately, without contacting the model.
+
+## What the shell supports
+
+- Launching programs from `PATH` or an explicit executable path, with arguments.
+- Single/double quotes, empty quoted arguments, and backslash escapes.
+- Builtins: `cd [directory]`, `pwd`, and `exit`. `cd` persists across commands;
+  `cd` alone goes home, and `cd ~/directory` works.
+- Foreground programs inherit terminal input and output, so commands such as
+  `cat` can read input. Ctrl-C interrupts the foreground command and returns to
+  the prompt. There is no job control or background-job management.
+- Up/down recalls input for the current session. Ctrl-D exits at the prompt.
+- `help` or `/help` shows usage. `/clear` resets the AI conversation;
+  `/exit` and `/quit` are aliases for `exit`.
+
+This is a deliberately small command language. **Pipes, redirection, chaining,
+globbing, variable expansion, command substitution, scripts, `source`, and
+`export` are not implemented yet.** Unsupported syntax is rejected instead of
+being passed to another shell. Use separate commands and explicit paths.
 
 ## How it works
 
-1. Append your message to an in-memory conversation.
-2. Send it to the model with two function definitions.
-3. Display the answer, or execute a requested tool.
-4. Append the tool result and ask the model to continue.
+```text
+Ordinary command -> Rust argument parser -> builtin or direct process launch
+? AI request     -> model -> tool request -> approval for commands -> direct launch
+                         <- actual tool result <-----------------------------+
+```
+
+Spark launches executables with `Command::new(program).args(arguments)`.
+It does **not** automatically wrap commands in `/bin/sh -c`. The user can still
+explicitly launch another shell as a program, just as with any other executable.
 
 | File | Responsibility |
 | --- | --- |
-| `src/main.rs` | Input, conversation, tool loop, approval |
+| `src/main.rs` | Prompt, command/AI routing, conversation, approval |
+| `src/shell.rs` | Argument parsing, builtins, foreground process execution |
 | `src/llm.rs` | OpenAI Responses HTTP request and tool definitions |
-| `src/tools.rs` | Project file reads and command execution |
+| `src/tools.rs` | AI file reads and bounded command capture |
 
 The API integration follows OpenAI's [function-calling guide](https://developers.openai.com/api/docs/guides/function-calling).
-All returned items, including reasoning items, are preserved in conversation
-history. Responses are requested with `store: false`; history stays in memory and
-is resent with each request. File reads and command results are sent to the API.
+AI history contains `?` conversations and tool results, including reasoning
+items. Ordinary command output stays in the terminal and is not included in AI
+history. Responses use `store: false`; history is held in memory and resent.
+Changing directory clears AI history so the next request starts in the new
+directory. Automatic file reads are limited to that directory and descendants,
+including after symlink resolution.
 
-## Deliberate limits
+## AI execution limits
 
-- **Two tools:** `read_file` and `run_command`. File reads are automatic inside the
-  project, including symlink resolution. Commands always require `y` or `yes`.
-- **Commands are not sandboxed.** Approval permits the exact displayed command
-  with your user permissions, including filesystem changes and network access.
-  The API key is removed from the child environment, but other environment
-  variables are inherited. Review commands and use projects you trust.
-- Commands use a fresh `/bin/sh` with no interactive stdin. A `cd` affects only
-  that command. Background jobs are cleaned up when the command finishes.
-- 30-second command deadline, 32 KiB per output stream, 32 KiB per file read,
-  120-second API deadline, and eight tool rounds followed by a summary request.
-  Output beyond the limit stops the command; use focused commands or filters.
-- Replies print after each API response; token streaming is deferred.
+- The AI has two tools: `read_file` and `run_command`. File reads are automatic;
+  commands require `y` or `yes`. Declining stops the turn.
+- AI commands use the same Rust argument parser. They run without interactive
+  stdin, with a 30-second deadline and 32 KiB per output stream. They cannot
+  invoke Spark's `cd` or `exit` builtins; use those at the prompt.
+- AI commands run in their own process group, which is cleaned up after
+  completion or cancellation. The API key is removed from their environment.
+  Ordinary user-entered programs inherit the user's environment and terminal.
+- File reads are limited to 32 KiB. API requests have a 120-second deadline.
+  Each request permits eight tool rounds followed by a summary request.
+- **Commands are not sandboxed.** They run with your user permissions, including
+  filesystem and network access. File reads and AI command output go to the API.
 - No saved sessions, automatic context trimming, dedicated file-editing tool,
-  indexing, plugins, or provider framework. Use `/clear` for a fresh context.
-  An explicitly approved shell command can still edit files.
+  indexing, plugins, or provider framework. Replies appear per API response;
+  token streaming is deferred.
 
 ## Check
 
@@ -104,12 +147,13 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 cargo build
 python3 tests/smoke.py
+python3 tests/terminal.py
 ```
 
-The smoke test uses a local fake Responses server and temporary projects; it
-needs no API key and makes no external AI requests. It exercises the real binary,
-tool-result round trips, approval/denial, follow-ups, reset, and API error recovery.
-It is a protocol test, not a substitute for a live model test.
+The tests cover parsing, directory changes, process output, limits, and the
+whole shell/AI flow. The smoke test uses a local fake Responses server and needs
+no key. The terminal test uses a pseudo-terminal to check interactive stdin and
+Ctrl-C. These checks do not substitute for testing a real model.
 
 `OPENAI_BASE_URL` optionally overrides `https://api.openai.com/v1`, primarily for
 the local test server. It must expose `/responses`; Spark sends the configured

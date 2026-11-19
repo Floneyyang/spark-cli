@@ -32,8 +32,8 @@ pub fn read_file(root: &Path, path: &str) -> Result<String> {
     Ok(text)
 }
 
-// The shell and its children share a process group. Always clean it up, including
-// when the future is cancelled or the shell leaves a background process running.
+// AI-requested programs and their children share a process group. Clean it up
+// on cancellation and when a program leaves descendants running.
 struct ProcessGroup(u32);
 
 impl Drop for ProcessGroup {
@@ -49,11 +49,21 @@ pub async fn run_command(root: &Path, command: &str) -> Result<(String, bool)> {
     run_with_timeout(root, command, COMMAND_TIMEOUT).await
 }
 
+pub fn command_args(command: &str) -> Result<Vec<String>> {
+    let args = crate::shell::parse_command(command)?;
+    let program = args.first().context("empty command")?;
+    if matches!(program.as_str(), "cd" | "exit" | "help") {
+        bail!("{program} is a Spark builtin; ask the user to use it at the prompt");
+    }
+    Ok(args)
+}
+
 async fn run_with_timeout(root: &Path, command: &str, timeout: Duration) -> Result<(String, bool)> {
-    let mut child = Command::new("/bin/sh")
-        .arg("-c")
-        .arg(command)
+    let args = command_args(command)?;
+    let mut child = Command::new(&args[0])
+        .args(&args[1..])
         .current_dir(root)
+        .env("PWD", root)
         .env_remove("OPENAI_API_KEY")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -83,7 +93,7 @@ async fn run_with_timeout(root: &Path, command: &str, timeout: Duration) -> Resu
         tokio::select! {
             result = child.wait(), if status.is_none() => {
                 status = Some(result?);
-                // Close pipes held by background children after the shell exits.
+                // Close pipes held by descendants after the program exits.
                 drop(group.take());
             }
             result = stdout.read(&mut out_buffer), if out_open => {
@@ -158,46 +168,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn captures_both_streams_and_failure_status() {
+    async fn captures_program_output_and_failure_status() {
         let project = tempfile::tempdir().unwrap();
-        let (result, cancelled) =
-            run_command(project.path(), "printf hello; printf problem >&2; exit 7")
-                .await
-                .unwrap();
-        assert!(result.contains("exit status: 7"));
-        assert!(result.contains("stdout:\nhello"));
-        assert!(result.contains("stderr:\nproblem"));
+        let (result, cancelled) = run_command(project.path(), "printf 'hello world'")
+            .await
+            .unwrap();
+        assert!(result.contains("exit status: 0"));
+        assert!(result.contains("stdout:\nhello world"));
         assert!(!cancelled);
+        let (result, _) = run_command(project.path(), "ls spark-intentionally-missing-file")
+            .await
+            .unwrap();
+        assert!(!result.contains("exit status: 0"));
+        assert!(result.contains("stderr:\nls:"));
     }
 
     #[tokio::test]
-    async fn times_out_even_if_a_pipe_closes_early() {
+    async fn times_out_programs() {
         let project = tempfile::tempdir().unwrap();
         let started = std::time::Instant::now();
-        let (result, _) = run_with_timeout(
-            project.path(),
-            "exec 1>&-; sleep 10",
-            Duration::from_millis(100),
-        )
-        .await
-        .unwrap();
+        let (result, _) = run_with_timeout(project.path(), "sleep 10", Duration::from_millis(100))
+            .await
+            .unwrap();
         assert!(result.contains("timed out"));
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 
     #[tokio::test]
-    async fn bounds_output_and_does_not_wait_for_background_children() {
+    async fn bounds_program_output() {
         let project = tempfile::tempdir().unwrap();
-        let (result, _) = run_command(project.path(), "while :; do printf 'lots of output'; done")
-            .await
-            .unwrap();
+        let (result, _) = run_command(project.path(), "yes").await.unwrap();
         assert!(result.contains("truncated"));
         assert!(result.len() < OUTPUT_LIMIT + 200);
-        let started = std::time::Instant::now();
-        let (result, _) = run_command(project.path(), "sleep 10 & printf done")
-            .await
-            .unwrap();
-        assert!(result.contains("done"));
-        assert!(started.elapsed() < Duration::from_secs(2));
     }
 }

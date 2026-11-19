@@ -1,4 +1,5 @@
 mod llm;
+mod shell;
 mod tools;
 
 use anyhow::{Result, bail};
@@ -13,24 +14,27 @@ async fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args == ["--help"] || args == ["-h"] {
         println!(
-            "Spark — a small AI assistant for your terminal\n\nUsage: spark\n\nSet OPENAI_API_KEY, then launch in your project.\nDefault model: gpt-5.4-mini (override with OPENAI_MODEL).\nCommands: /help, /clear, /exit"
+            "Spark — a small Rust shell with AI\n\nUsage: spark\n\nRun commands directly: ls, cd src, cargo test.\nStart an AI request with ?: ? explain this project\nAI uses OPENAI_API_KEY and defaults to gpt-5.4-mini (override with OPENAI_MODEL).\nBuiltins: cd, pwd, exit. /help for more."
         );
         return Ok(());
     }
     if !args.is_empty() {
         bail!("unexpected arguments; use spark --help");
     }
-    let ai = llm::Llm::from_env()?;
-    let root = env::current_dir()?.canonicalize()?;
+    let mut ai = None;
+    let mut root = env::current_dir()?.canonicalize()?;
     let mut editor = DefaultEditor::new()?;
     let mut history = Vec::new();
 
-    println!("Spark · {}\nProject: {}", ai.model, root.display());
-    println!("Ask about your project or request a task. /help for commands.");
-    println!("Project file reads go to the model. Every shell command needs approval.\n");
+    println!("Spark · Rust shell with AI\nDirectory: {}", root.display());
+    println!("Type commands directly, or ? followed by an AI request. /help for help.\n");
 
     loop {
-        let line = match editor.readline("you> ") {
+        let prompt = format!(
+            "spark:{}> ",
+            tools::display_text(&root.display().to_string())
+        );
+        let line = match editor.readline(&prompt) {
             Ok(line) => line,
             Err(ReadlineError::Interrupted) => continue,
             Err(ReadlineError::Eof) => break,
@@ -45,21 +49,46 @@ async fn main() -> Result<()> {
                 println!("Conversation cleared.\n");
                 continue;
             }
-            "/help" => {
+            "/help" | "help" => {
                 println!(
-                    "Ask a question or give a task, e.g. 'Read Cargo.toml and explain this project'.\n/clear  Reset conversation\n/exit   Quit (or Ctrl-D)\n\nCommands need y/yes to run. Enter or Ctrl-C cancels approval.\nCtrl-C cancels a running command or API request.\n"
+                    "Commands: ls -la, cargo test, cd src, pwd, exit\nAI: ? Read Cargo.toml and explain this project\nFollow-up: ? What should I look at next?\n/clear  Reset AI conversation\n/exit   Quit (or Ctrl-D)\n\nSpark launches programs directly and supports quoted arguments.\nPipes, redirection, expansion, chaining, and job control are not implemented yet.\nOnly AI-requested commands need approval. AI file reads and tool results go to the model.\nCtrl-C cancels a running command or AI request.\n"
                 );
-                continue;
-            }
-            _ if input.starts_with('/') => {
-                println!("Unknown command. Type /help.\n");
                 continue;
             }
             _ => {}
         }
         editor.add_history_entry(input)?;
+        let Some(input) = input.strip_prefix('?').map(str::trim) else {
+            let previous_root = root.clone();
+            match shell::run(&mut root, input).await {
+                Ok(true) => break,
+                Ok(false) => {}
+                Err(error) => eprintln!("spark: {}", tools::display_text(&format!("{error:#}"))),
+            }
+            if root != previous_root && !history.is_empty() {
+                history.clear();
+                println!("Directory changed; AI conversation cleared.");
+            }
+            continue;
+        };
+        if input.is_empty() {
+            println!("Type a request after ?, e.g. ? explain this project");
+            continue;
+        }
+        if ai.is_none() {
+            match llm::Llm::from_env() {
+                Ok(client) => {
+                    println!("AI model: {}", client.model);
+                    ai = Some(client);
+                }
+                Err(error) => {
+                    eprintln!("AI unavailable: {error:#}");
+                    continue;
+                }
+            }
+        }
         history.push(json!({"role": "user", "content": input}));
-        if let Err(error) = turn(&ai, &root, &mut history, &mut editor).await {
+        if let Err(error) = turn(ai.as_ref().unwrap(), &root, &mut history, &mut editor).await {
             eprintln!(
                 "Error: {}\nYou can try again, or /clear to start fresh.",
                 tools::display_text(&format!("{error:#}"))
@@ -145,6 +174,7 @@ async fn execute(item: &Value, root: &Path, editor: &mut DefaultEditor) -> Resul
             let command = args["command"]
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("missing command"))?;
+            tools::command_args(command)?;
             // Reject control characters so the approval always shows the actual command.
             if command
                 .chars()

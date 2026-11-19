@@ -2,7 +2,7 @@
 name = "spark-cli"
 version = "0.1.0"
 edition = "2024"
-description = "A small AI assistant for your terminal"
+description = "A small Rust shell with AI assistance"
 
 [[bin]]
 name = "spark"

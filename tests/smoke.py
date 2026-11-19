@@ -3,6 +3,8 @@
 import json
 import os
 import signal
+import shlex
+import sys
 from pathlib import Path
 import subprocess
 import tempfile
@@ -12,6 +14,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 BINARY = Path(__file__).resolve().parents[1] / "target/debug/spark"
+
+
+def python_command(source):
+    return f"{shlex.quote(sys.executable)} -c {shlex.quote(source)}"
 
 
 def message(text):
@@ -79,7 +85,7 @@ def run_case(replies, inputs, check, cancel_command=False, model="test-model"):
                                 raise AssertionError("command never started")
                             time.sleep(0.01)
                         process.send_signal(signal.SIGINT)
-                        stdout, stderr = process.communicate("what happened?\n/exit\n", timeout=5)
+                        stdout, stderr = process.communicate("? what happened?\n/exit\n", timeout=5)
                         result = subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
                     time.sleep(0.6)
                 else:
@@ -108,6 +114,8 @@ def check_flow(requests, result, root):
     assert len(requests[3]["input"]) > len(requests[2]["input"])
     assert requests[4]["input"] == [{"role": "user", "content": "try another command"}]
     assert any("User cancelled" in item.get("output", "") for item in requests[5]["input"])
+    assert requests[6]["input"] == [{"role": "user", "content": "where am I?"}]
+    assert str((root / "other").resolve()) in requests[6]["instructions"]
     assert "Follow-up retained." in result.stdout
     assert "Stopped." in result.stdout
     assert all(request["store"] is False for request in requests)
@@ -116,14 +124,15 @@ def check_flow(requests, result, root):
 run_case([
     [{"type": "reasoning", "id": "reasoning-test", "summary": [], "encrypted_content": "test"},
      call("read_file", {"path": "README.md"}, "read-1")],
-    [call("run_command", {"command": "printf ok > approved; test -z \"$OPENAI_API_KEY\" && printf key-removed",
+    [call("run_command", {"command": python_command("from pathlib import Path; import os; Path('approved').write_text('ok'); print('key-removed' if 'OPENAI_API_KEY' not in os.environ else 'key-present')"),
                           "reason": "Make an approved demo file."}, "run-1")],
     [message("Read and command completed.")],
     [message("Follow-up retained.")],
     [call("run_command", {"command": "touch denied", "reason": "Test denial."}, "deny-1")],
     [message("I will not retry the denied command.")],
-], "inspect and run\ny\nwhat happened?\n/clear\ntry another command\n\nnever mind\n/exit\n", check_flow)
-print("PASS: reads, approval, real command output, follow-up, reset, denial")
+    [message("New directory context.")],
+], "? inspect and run\ny\n? what happened?\n/clear\n? try another command\n\n? never mind\nmkdir other\ncd other\n? where am I?\n/exit\n", check_flow)
+print("PASS: reads, approval, real command output, follow-up, reset, denial, directory context")
 
 
 def check_recovery(requests, result, root):
@@ -137,7 +146,7 @@ run_case([
     (401, {"error": {"message": "Invalid key fake-test-key"}}),
     [call("read_file", {"path": "missing.txt"}, "missing")],
     [message("Recovered.")],
-], "first\ntry again\n/exit\n", check_recovery)
+], "? first\n? try again\n/exit\n", check_recovery)
 print("PASS: API error recovery, credential redaction, tool error feedback")
 
 
@@ -150,7 +159,7 @@ def check_limit(requests, result, root):
 run_case([
     [call("read_file", {"path": "README.md"}, f"read-{index}")]
     for index in range(8)
-] + [[message("Limit summary.")]], "inspect\n/exit\n", check_limit, model=None)
+] + [[message("Limit summary.")]], "? inspect\n/exit\n", check_limit, model=None)
 print("PASS: default model works without OPENAI_MODEL; tool loop stops after eight rounds")
 
 
@@ -165,16 +174,36 @@ def check_cancel(requests, result, root):
 
 
 run_case([
-    [call("run_command", {"command": "printf began; touch started; sleep 0.5; touch leaked",
+    [call("run_command", {"command": python_command("import subprocess, sys, time; from pathlib import Path; subprocess.Popen([sys.executable, '-c', \"import time; from pathlib import Path; time.sleep(0.5); Path('leaked').touch()\"]); print('began', flush=True); Path('started').touch(); time.sleep(10)"),
                           "reason": "Exercise cancellation."}, "cancel-1")],
     [message("Cancellation retained.")],
-], "run\ny\n", check_cancel, cancel_command=True)
+], "? run\ny\n", check_cancel, cancel_command=True)
 print("PASS: Ctrl-C stops command children and preserves partial output for follow-ups")
 
 env = {key: value for key, value in os.environ.items()
        if key not in {"OPENAI_API_KEY", "OPENAI_MODEL"}}
 help_result = subprocess.run([str(BINARY), "--help"], env=env, capture_output=True, text=True)
 assert help_result.returncode == 0 and "Usage: spark" in help_result.stdout
-missing_key = subprocess.run([str(BINARY)], env=env, capture_output=True, text=True)
-assert missing_key.returncode != 0 and "OPENAI_API_KEY" in missing_key.stderr
-print("PASS: help without credentials and actionable missing-key error")
+missing_key = subprocess.run([str(BINARY)], input="? hello\npwd\nexit\n", env=env, capture_output=True, text=True)
+assert missing_key.returncode == 0 and "OPENAI_API_KEY" in missing_key.stderr
+assert "AI unavailable" in missing_key.stderr
+print("PASS: shell runs without credentials; missing AI key does not end the session")
+
+with tempfile.TemporaryDirectory(prefix="spark-native-") as project:
+    root = Path(project).resolve()
+    result = subprocess.run([str(BINARY)], input="\n".join([
+        'mkdir "two words"', 'cd "two words"', 'pwd',
+        python_command("import os; print('child-cwd=' + os.getcwd()); print('child-PWD=' + os.environ['PWD'])"),
+        'cd missing', 'pwd', 'cd ..', "printf '%s' 'literal | > $HOME'",
+        'touch should-not-exist > rejected', 'spark-no-such-program', 'pwd', 'exit', ''
+    ]), env=env, cwd=root, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count(str(root / "two words")) >= 4, result.stdout
+    assert "literal | > $HOME" in result.stdout
+    assert "Run this command?" not in result.stdout
+    assert "AI model:" not in result.stdout
+    assert "not supported yet" in result.stderr
+    assert "could not start" in result.stderr
+    assert not (root / "should-not-exist").exists()
+    assert not (root / "rejected").exists()
+print("PASS: direct execution, quoted arguments, persistent cd, child cwd/PWD, errors, unsupported syntax")
