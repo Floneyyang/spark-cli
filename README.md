@@ -10,13 +10,14 @@ Install a current stable Rust toolchain from [rustup.rs](https://rustup.rs), the
 
 ```sh
 export OPENAI_API_KEY='your-api-key'
-export OPENAI_MODEL='your-model-id'
 cargo run
 ```
 
-Choose a model available to your account that supports function calling through
-the OpenAI Responses API. There is deliberately no hardcoded model default.
-Variables must be exported in your shell; `.env` files are not loaded.
+Spark defaults to [`gpt-5.4-mini`](https://developers.openai.com/api/docs/models/gpt-5.4-mini),
+a compact coding model with Responses API function calling. Your API account
+needs access to the model. To choose another compatible model, export
+`OPENAI_MODEL='your-model-id'`. Variables must be exported in your shell;
+`.env` files are not loaded.
 
 To use Spark from another project:
 

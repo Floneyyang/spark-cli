@@ -25,7 +25,7 @@ def call(name, args, call_id):
             "arguments": json.dumps(args), "call_id": call_id}
 
 
-def run_case(replies, inputs, check, cancel_command=False):
+def run_case(replies, inputs, check, cancel_command=False, model="test-model"):
     requests = []
     errors = []
 
@@ -38,6 +38,7 @@ def run_case(replies, inputs, check, cancel_command=False):
                 assert self.path == "/v1/responses"
                 assert self.headers["Authorization"] == "Bearer fake-test-key"
                 request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                assert request["model"] == (model or "gpt-5.4-mini")
                 requests.append(request)
                 reply = replies[len(requests) - 1]
                 status, body = (reply if isinstance(reply, tuple) else
@@ -61,6 +62,10 @@ def run_case(replies, inputs, check, cancel_command=False):
                 (root / "README.md").write_text("A tiny demo project.\n")
                 env = dict(os.environ, OPENAI_API_KEY="fake-test-key", OPENAI_MODEL="test-model",
                            OPENAI_BASE_URL=f"http://127.0.0.1:{server.server_port}/v1")
+                if model is None:
+                    env.pop("OPENAI_MODEL", None)
+                else:
+                    env["OPENAI_MODEL"] = model
                 if cancel_command:
                     with subprocess.Popen([str(BINARY)], text=True, stdin=subprocess.PIPE,
                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -145,8 +150,8 @@ def check_limit(requests, result, root):
 run_case([
     [call("read_file", {"path": "README.md"}, f"read-{index}")]
     for index in range(8)
-] + [[message("Limit summary.")]], "inspect\n/exit\n", check_limit)
-print("PASS: tool loop stops after eight rounds and asks for a summary")
+] + [[message("Limit summary.")]], "inspect\n/exit\n", check_limit, model=None)
+print("PASS: default model works without OPENAI_MODEL; tool loop stops after eight rounds")
 
 
 def check_cancel(requests, result, root):

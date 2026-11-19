@@ -13,7 +13,7 @@ async fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args == ["--help"] || args == ["-h"] {
         println!(
-            "Spark — a small AI assistant for your terminal\n\nUsage: spark\n\nSet OPENAI_API_KEY and OPENAI_MODEL, then launch in your project.\nCommands: /help, /clear, /exit"
+            "Spark — a small AI assistant for your terminal\n\nUsage: spark\n\nSet OPENAI_API_KEY, then launch in your project.\nDefault model: gpt-5.4-mini (override with OPENAI_MODEL).\nCommands: /help, /clear, /exit"
         );
         return Ok(());
     }

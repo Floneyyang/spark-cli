@@ -13,8 +13,7 @@ pub struct Llm {
 impl Llm {
     pub fn from_env() -> Result<Self> {
         let key = env::var("OPENAI_API_KEY").context("set OPENAI_API_KEY before starting Spark")?;
-        let model = env::var("OPENAI_MODEL")
-            .context("set OPENAI_MODEL to a model supporting Responses function calling")?;
+        let model = env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-5.4-mini".into());
         if key.trim().is_empty() || model.trim().is_empty() {
             bail!("OPENAI_API_KEY and OPENAI_MODEL must not be empty");
         }
