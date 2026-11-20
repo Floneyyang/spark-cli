@@ -14,26 +14,34 @@ async fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args == ["--help"] || args == ["-h"] {
         println!(
-            "Spark — a small Rust shell with AI\n\nUsage: spark\n\nRun commands directly: ls, cd src, cargo test.\nStart an AI request with ?: ? explain this project\nAI uses OPENAI_API_KEY and defaults to gpt-5.4-mini (override with OPENAI_MODEL).\nBuiltins: cd, pwd, exit. /help for more."
+            "Spark — a small Rust shell with AI\n\nUsage: spark\n\nRun commands directly: ls, cd src, cargo test.\nEnter AI chat with ? or ? explain this project.\nKeep chatting without ?; /shell returns to shell mode.\nAI uses OPENAI_API_KEY and defaults to gpt-5.4-mini (override with OPENAI_MODEL).\nBuiltins: cd, pwd, exit. /help for more."
         );
         return Ok(());
     }
     if !args.is_empty() {
         bail!("unexpected arguments; use spark --help");
     }
+    // Keep SIGINT handled even before the first command or API request, including
+    // the brief gaps between readline calls. Ctrl-C must not terminate Spark.
+    let _interrupts = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
     let mut ai = None;
     let mut root = env::current_dir()?.canonicalize()?;
     let mut editor = DefaultEditor::new()?;
     let mut history = Vec::new();
+    let mut ai_mode = false;
 
     println!("Spark · Rust shell with AI\nDirectory: {}", root.display());
-    println!("Type commands directly, or ? followed by an AI request. /help for help.\n");
+    println!("Type commands directly, or ? to enter AI chat. /shell returns to the shell.\n");
 
     loop {
-        let prompt = format!(
-            "spark:{}> ",
-            tools::display_text(&root.display().to_string())
-        );
+        let prompt = if ai_mode {
+            "ai> ".into()
+        } else {
+            format!(
+                "spark:{}> ",
+                tools::display_text(&root.display().to_string())
+            )
+        };
         let line = match editor.readline(&prompt) {
             Ok(line) => line,
             Err(ReadlineError::Interrupted) => continue,
@@ -44,21 +52,35 @@ async fn main() -> Result<()> {
         match input {
             "" => continue,
             "/exit" | "/quit" => break,
+            "/shell" => {
+                ai_mode = false;
+                println!("Shell mode. Type ? to resume AI chat.\n");
+                continue;
+            }
             "/clear" => {
                 history.clear();
                 println!("Conversation cleared.\n");
                 continue;
             }
-            "/help" | "help" => {
+            "/help" | "help" if input == "/help" || !ai_mode => {
                 println!(
-                    "Commands: ls -la, cargo test, cd src, pwd, exit\nAI: ? Read Cargo.toml and explain this project\nFollow-up: ? What should I look at next?\n/clear  Reset AI conversation\n/exit   Quit (or Ctrl-D)\n\nSpark launches programs directly and supports quoted arguments.\nPipes, redirection, expansion, chaining, and job control are not implemented yet.\nOnly AI-requested commands need approval. AI file reads and tool results go to the model.\nCtrl-C cancels a running command or AI request.\n"
+                    "Shell commands: ls -la, cargo test, cd src, pwd, exit\nEnter AI chat: ? or ? Read Cargo.toml and explain this project\nIn AI mode, keep chatting normally without repeating ?.\n/shell  Return to shell mode (keeps AI history)\n/clear  Reset AI conversation (keeps the current mode)\n/exit   Quit Spark from either mode (or Ctrl-D)\n\nSpark launches programs directly and supports quoted arguments.\nPipes, redirection, expansion, chaining, and job control are not implemented yet.\nOnly AI-requested commands need approval. AI file reads and tool results go to the model.\nCtrl-C cancels the current action and keeps the current mode.\n"
                 );
                 continue;
             }
             _ => {}
         }
         editor.add_history_entry(input)?;
-        let Some(input) = input.strip_prefix('?').map(str::trim) else {
+        let input = if let Some(request) = input.strip_prefix('?') {
+            if !ai_mode {
+                println!("AI mode. Keep chatting normally; /shell returns to the shell.");
+            }
+            ai_mode = true;
+            request.trim()
+        } else {
+            input
+        };
+        if !ai_mode {
             let previous_root = root.clone();
             match shell::run(&mut root, input).await {
                 Ok(true) => break,
@@ -70,9 +92,8 @@ async fn main() -> Result<()> {
                 println!("Directory changed; AI conversation cleared.");
             }
             continue;
-        };
+        }
         if input.is_empty() {
-            println!("Type a request after ?, e.g. ? explain this project");
             continue;
         }
         if ai.is_none() {

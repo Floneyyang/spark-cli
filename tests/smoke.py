@@ -85,7 +85,7 @@ def run_case(replies, inputs, check, cancel_command=False, model="test-model"):
                                 raise AssertionError("command never started")
                             time.sleep(0.01)
                         process.send_signal(signal.SIGINT)
-                        stdout, stderr = process.communicate("? what happened?\n/exit\n", timeout=5)
+                        stdout, stderr = process.communicate("what happened?\n/exit\n", timeout=5)
                         result = subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
                     time.sleep(0.6)
                 else:
@@ -131,7 +131,7 @@ run_case([
     [call("run_command", {"command": "touch denied", "reason": "Test denial."}, "deny-1")],
     [message("I will not retry the denied command.")],
     [message("New directory context.")],
-], "? inspect and run\ny\n? what happened?\n/clear\n? try another command\n\n? never mind\nmkdir other\ncd other\n? where am I?\n/exit\n", check_flow)
+], "? inspect and run\ny\nwhat happened?\n/clear\ntry another command\n\nnever mind\n/shell\nmkdir other\ncd other\n? where am I?\n/exit\n", check_flow)
 print("PASS: reads, approval, real command output, follow-up, reset, denial, directory context")
 
 
@@ -146,7 +146,7 @@ run_case([
     (401, {"error": {"message": "Invalid key fake-test-key"}}),
     [call("read_file", {"path": "missing.txt"}, "missing")],
     [message("Recovered.")],
-], "? first\n? try again\n/exit\n", check_recovery)
+], "? first\ntry again\n/exit\n", check_recovery)
 print("PASS: API error recovery, credential redaction, tool error feedback")
 
 
@@ -180,13 +180,30 @@ run_case([
 ], "? run\ny\n", check_cancel, cancel_command=True)
 print("PASS: Ctrl-C stops command children and preserves partial output for follow-ups")
 
+
+def check_chat_mode(requests, result, root):
+    assert not (root / "should-stay-text").exists()
+    assert requests[0]["input"] == [{"role": "user", "content": "hello"}]
+    assert requests[1]["input"][-1]["content"] == "touch should-stay-text"
+    assert len(requests[2]["input"]) > len(requests[1]["input"])
+    assert requests[2]["input"][-1]["content"] == "remember our conversation?"
+    assert "back-in-shell" in result.stdout
+    assert "could not start" not in result.stderr
+
+
+run_case([
+    [message("Hello.")], [message("That stays in chat.")], [message("History retained.")],
+], "?\nhello\ntouch should-stay-text\n/shell\nprintf back-in-shell\n? remember our conversation?\n/exit\n", check_chat_mode)
+print("PASS: persistent chat, bare ?, no accidental execution, /shell, retained history")
+
 env = {key: value for key, value in os.environ.items()
        if key not in {"OPENAI_API_KEY", "OPENAI_MODEL"}}
 help_result = subprocess.run([str(BINARY), "--help"], env=env, capture_output=True, text=True)
 assert help_result.returncode == 0 and "Usage: spark" in help_result.stdout
-missing_key = subprocess.run([str(BINARY)], input="? hello\npwd\nexit\n", env=env, capture_output=True, text=True)
+missing_key = subprocess.run([str(BINARY)], input="? hello\npwd\n/shell\npwd\nexit\n", env=env, capture_output=True, text=True)
 assert missing_key.returncode == 0 and "OPENAI_API_KEY" in missing_key.stderr
 assert "AI unavailable" in missing_key.stderr
+assert missing_key.stderr.count("AI unavailable") == 2
 print("PASS: shell runs without credentials; missing AI key does not end the session")
 
 with tempfile.TemporaryDirectory(prefix="spark-native-") as project:

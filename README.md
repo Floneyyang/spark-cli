@@ -1,8 +1,8 @@
 # Spark
 
 A small **shell written in Rust, with AI assistance**. Type ordinary commands to
-run programs directly. Prefix a request with `?` to ask AI to inspect files,
-propose commands, or explain something. macOS and Linux only.
+run programs directly. Type `?` or `? your question` to enter AI chat, then keep
+talking without repeating `?`. Use `/shell` to return to commands. macOS and Linux only.
 
 ```text
 spark:/your/project> ls
@@ -13,6 +13,11 @@ spark:/your/project/src> pwd
 spark:/your/project/src> ? explain main.rs
   read main.rs
 spark> ...
+ai> which function should I read first?
+spark> ...
+ai> /shell
+spark:/your/project/src> pwd
+/your/project/src
 ```
 
 ## Run
@@ -58,7 +63,7 @@ spark:/your/project> ? Read Cargo.toml and explain this project.
   read Cargo.toml
 spark> ...
 
-spark:/your/project> ? Run the tests and explain the result.
+ai> Run the tests and explain the result.
   Directory: /your/project
   Command: cargo test
   Reason: Check the project's tests.
@@ -67,14 +72,18 @@ Exit: exit status: 0
 ...
 spark> ...
 
-spark:/your/project> ? Which source file should I read first?
+ai> Which source file should I read first?
 spark> ...
 
+ai> /shell
 spark:/your/project> exit
 ```
 
 AI wording and tool choices vary. **Only AI-requested commands need approval.**
-Ordinary commands execute immediately, without contacting the model.
+In shell mode, ordinary commands execute immediately without contacting the model.
+In AI mode, all ordinary text is a chat message; switch back with `/shell` before
+typing a command you want to execute directly. The `ai>` prompt identifies AI mode.
+AI mode persists after replies, errors, declined commands, and Ctrl-C.
 
 ## What the shell supports
 
@@ -86,8 +95,10 @@ Ordinary commands execute immediately, without contacting the model.
   `cat` can read input. Ctrl-C interrupts the foreground command and returns to
   the prompt. There is no job control or background-job management.
 - Up/down recalls input for the current session. Ctrl-D exits at the prompt.
-- `help` or `/help` shows usage. `/clear` resets the AI conversation;
-  `/exit` and `/quit` are aliases for `exit`.
+- `help` in shell mode, or `/help` in either mode, shows usage.
+- `/shell` returns to commands and keeps the AI conversation for later.
+  Enter `?` again to resume it. `/clear` resets the conversation without changing mode.
+- `/exit` and `/quit` quit Spark from either mode. Plain `exit` quits in shell mode.
 
 This is a deliberately small command language. **Pipes, redirection, chaining,
 globbing, variable expansion, command substitution, scripts, `source`, and
@@ -98,7 +109,7 @@ being passed to another shell. Use separate commands and explicit paths.
 
 ```text
 Ordinary command -> Rust argument parser -> builtin or direct process launch
-? AI request     -> model -> tool request -> approval for commands -> direct launch
+AI chat message -> model -> tool request -> approval for commands -> direct launch
                          <- actual tool result <-----------------------------+
 ```
 
@@ -114,7 +125,7 @@ explicitly launch another shell as a program, just as with any other executable.
 | `src/tools.rs` | AI file reads and bounded command capture |
 
 The API integration follows OpenAI's [function-calling guide](https://developers.openai.com/api/docs/guides/function-calling).
-AI history contains `?` conversations and tool results, including reasoning
+AI history contains chat messages and tool results, including reasoning
 items. Ordinary command output stays in the terminal and is not included in AI
 history. Responses use `store: false`; history is held in memory and resent.
 Changing directory clears AI history so the next request starts in the new
