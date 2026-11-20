@@ -50,34 +50,12 @@ cd /path/to/your/project
 spark
 ```
 
-## Two-minute demo
+## Demo
 
-```text
-spark-shell> pwd
-/your/project
+Chat with Spark, ask for a reply in cat meow language, then switch back to
+shell mode to run commands directly.
 
-spark-shell> cargo test
-...real test output, directly in your terminal...
-
-spark-shell> ? Read Cargo.toml and explain this project.
-  read Cargo.toml
-spark> ...
-
-spark> Run the tests and explain the result.
-  Directory: /your/project
-  Command: cargo test
-  Reason: Check the project's tests.
-Run this command? [y/N] y
-Exit: exit status: 0
-...
-spark> ...
-
-spark> Which source file should I read first?
-spark> ...
-
-spark> /shell
-spark-shell> exit
-```
+![Spark chatting in AI mode, then switching to shell mode to run ls and echo](docs/assets/spark-shell-demo.gif)
 
 AI wording and tool choices vary. **Only AI-requested commands need approval.**
 In shell mode, ordinary commands execute immediately without contacting the model.
