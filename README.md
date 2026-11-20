@@ -5,18 +5,18 @@ run programs directly. Type `?` or `? your question` to enter AI chat, then keep
 talking without repeating `?`. Use `/shell` to return to commands. macOS and Linux only.
 
 ```text
-spark:/your/project> ls
+spark-shell> ls
 Cargo.toml  src  README.md
-spark:/your/project> cd src
-spark:/your/project/src> pwd
+spark-shell> cd src
+spark-shell> pwd
 /your/project/src
-spark:/your/project/src> ? explain main.rs
+spark-shell> ? explain main.rs
   read main.rs
 spark> ...
 spark> which function should I read first?
 spark> ...
 spark> /shell
-spark:/your/project/src> pwd
+spark-shell> pwd
 /your/project/src
 ```
 
@@ -53,13 +53,13 @@ spark
 ## Two-minute demo
 
 ```text
-spark:/your/project> pwd
+spark-shell> pwd
 /your/project
 
-spark:/your/project> cargo test
+spark-shell> cargo test
 ...real test output, directly in your terminal...
 
-spark:/your/project> ? Read Cargo.toml and explain this project.
+spark-shell> ? Read Cargo.toml and explain this project.
   read Cargo.toml
 spark> ...
 
@@ -76,13 +76,13 @@ spark> Which source file should I read first?
 spark> ...
 
 spark> /shell
-spark:/your/project> exit
+spark-shell> exit
 ```
 
 AI wording and tool choices vary. **Only AI-requested commands need approval.**
 In shell mode, ordinary commands execute immediately without contacting the model.
 In AI mode, all ordinary text is a chat message; switch back with `/shell` before
-typing a command you want to execute directly. The `spark>` prompt identifies AI mode.
+typing a command you want to execute directly. The prompts are `spark-shell>` for shell mode and `spark>` for AI mode. Use `pwd` to see the current directory.
 AI mode persists after replies, errors, declined commands, and Ctrl-C.
 
 ## What the shell supports

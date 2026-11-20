@@ -34,15 +34,8 @@ async fn main() -> Result<()> {
     println!("Type commands directly, or ? to enter AI chat. /shell returns to the shell.\n");
 
     loop {
-        let prompt = if ai_mode {
-            "spark> ".into()
-        } else {
-            format!(
-                "spark:{}> ",
-                tools::display_text(&root.display().to_string())
-            )
-        };
-        let line = match editor.readline(&prompt) {
+        let prompt = if ai_mode { "spark> " } else { "spark-shell> " };
+        let line = match editor.readline(prompt) {
             Ok(line) => line,
             Err(ReadlineError::Interrupted) => continue,
             Err(ReadlineError::Eof) => break,

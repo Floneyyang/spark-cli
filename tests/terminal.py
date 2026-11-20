@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix="spark-terminal-") as directory:
     reaped = False
     try:
         fcntl.ioctl(terminal, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 120, 0, 0))
-        read_until(b"> ")
+        read_until(b"spark-shell> ")
         os.write(terminal, b"?\n")
         read_until(b"AI mode. Keep chatting normally; /shell returns to the shell.")
         read_until(b"spark> ")
@@ -57,7 +57,7 @@ with tempfile.TemporaryDirectory(prefix="spark-terminal-") as directory:
         read_until(b"spark> ")
         os.write(terminal, b"/shell\n")
         read_until(b"Shell mode. Type ? to resume AI chat.")
-        read_until(b"> ")
+        read_until(b"spark-shell> ")
         child_code = "print('child-ready', flush=True); line = input(); print('child-echo:' + line, flush=True); input()"
         command = f"{shlex.quote(sys.executable)} -c {shlex.quote(child_code)}\n"
         os.write(terminal, command.encode())
@@ -66,10 +66,10 @@ with tempfile.TemporaryDirectory(prefix="spark-terminal-") as directory:
         os.write(terminal, b"hello-from-stdin\n")
         read_until(b"\r\nchild-echo:hello-from-stdin\r\n")
         os.write(terminal, b"\x03")
-        read_until(b"> ")
+        read_until(b"spark-shell> ")
         os.write(terminal, b"pwd\n")
         read_until(b"\r\n" + str(Path(directory).resolve()).encode() + b"\r\n")
-        read_until(b"> ")
+        read_until(b"spark-shell> ")
         os.write(terminal, b"exit\n")
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
