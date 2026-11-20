@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
 
     loop {
         let prompt = if ai_mode {
-            "ai> ".into()
+            "spark> ".into()
         } else {
             format!(
                 "spark:{}> ",

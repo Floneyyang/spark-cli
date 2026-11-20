@@ -13,9 +13,9 @@ spark:/your/project/src> pwd
 spark:/your/project/src> ? explain main.rs
   read main.rs
 spark> ...
-ai> which function should I read first?
+spark> which function should I read first?
 spark> ...
-ai> /shell
+spark> /shell
 spark:/your/project/src> pwd
 /your/project/src
 ```
@@ -63,7 +63,7 @@ spark:/your/project> ? Read Cargo.toml and explain this project.
   read Cargo.toml
 spark> ...
 
-ai> Run the tests and explain the result.
+spark> Run the tests and explain the result.
   Directory: /your/project
   Command: cargo test
   Reason: Check the project's tests.
@@ -72,17 +72,17 @@ Exit: exit status: 0
 ...
 spark> ...
 
-ai> Which source file should I read first?
+spark> Which source file should I read first?
 spark> ...
 
-ai> /shell
+spark> /shell
 spark:/your/project> exit
 ```
 
 AI wording and tool choices vary. **Only AI-requested commands need approval.**
 In shell mode, ordinary commands execute immediately without contacting the model.
 In AI mode, all ordinary text is a chat message; switch back with `/shell` before
-typing a command you want to execute directly. The `ai>` prompt identifies AI mode.
+typing a command you want to execute directly. The `spark>` prompt identifies AI mode.
 AI mode persists after replies, errors, declined commands, and Ctrl-C.
 
 ## What the shell supports
